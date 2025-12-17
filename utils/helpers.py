@@ -176,9 +176,94 @@ def draw_velocity_arrow(frame, position, velocity, scale=10, color=(255, 0, 0), 
     return frame
 
 
+def draw_broadcast_overlay(frame, shot_data, position='top_left'):
+    """Draw professional tennis broadcast-style overlay.
+    
+    Args:
+        frame: Image to draw on
+        shot_data: Dictionary with shot information
+        position: 'top_left', 'top_right', 'bottom_left', 'bottom_right'
+    
+    Returns:
+        Frame with broadcast overlay
+    """
+    h, w = frame.shape[:2]
+    
+    # Determine position
+    if position == 'top_right':
+        x, y = w - 320, 20
+    elif position == 'bottom_left':
+        x, y = 20, h - 150
+    elif position == 'bottom_right':
+        x, y = w - 320, h - 150
+    else:  # top_left
+        x, y = 20, 20
+    
+    # Create overlay
+    overlay = frame.copy()
+    
+    # Main panel background
+    panel_width = 300
+    panel_height = 130
+    
+    # Gradient background effect
+    cv2.rectangle(overlay, (x, y), (x + panel_width, y + panel_height), 
+                 (20, 20, 20), -1)
+    
+    # Colored accent bar (tennis green/blue)
+    accent_color = (100, 200, 50)  # Tennis court green
+    cv2.rectangle(overlay, (x, y), (x + 8, y + panel_height), accent_color, -1)
+    
+    # Border
+    cv2.rectangle(overlay, (x, y), (x + panel_width, y + panel_height), 
+                 (80, 80, 80), 2)
+    
+    # Blend overlay
+    cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
+    
+    # Draw content
+    text_x = x + 20
+    text_y = y + 30
+    
+    # Track ID (small header)
+    track_id = shot_data.get('track_id', 0)
+    cv2.putText(frame, f"TRACK #{track_id}", (text_x, text_y), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
+    
+    # Shot type (large, prominent)
+    shot_type = shot_data.get('shot_type', 'Unknown')
+    text_y += 28
+    cv2.putText(frame, shot_type.upper(), (text_x, text_y), 
+               cv2.FONT_HERSHEY_DUPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+    
+    # Apex height with icon
+    apex = shot_data.get('apex_height', 0)
+    height_class = shot_data.get('height_class', '')
+    text_y += 26
+    height_text = f"HEIGHT: {apex:.1f}m ({height_class})"
+    cv2.putText(frame, height_text, (text_x, text_y), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 200, 255), 1, cv2.LINE_AA)
+    
+    # Speed with icon
+    speed = shot_data.get('speed', 0)
+    text_y += 24
+    speed_text = f"SPEED: {speed:.0f} km/h"
+    cv2.putText(frame, speed_text, (text_x, text_y), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 100), 2, cv2.LINE_AA)
+    
+    # Direction
+    direction = shot_data.get('direction', 'Unknown')
+    text_y += 24
+    direction_text = f"DIR: {direction}"
+    cv2.putText(frame, direction_text, (text_x, text_y), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 200), 1, cv2.LINE_AA)
+    
+    return frame
+
+
 def draw_info_panel(frame, info_dict, position=(10, 30), font_scale=0.6, 
                     color=(255, 255, 255), bg_color=(0, 0, 0)):
-    """Draw information panel on frame.
+    """Draw broadcast-style information panel with professional styling.
     
     Args:
         frame: Image to draw on
@@ -192,21 +277,60 @@ def draw_info_panel(frame, info_dict, position=(10, 30), font_scale=0.6,
         Frame with info panel
     """
     x, y = position
-    line_height = 25
+    line_height = 28
+    padding_x = 15
+    padding_y = 10
     
-    for i, (label, value) in enumerate(info_dict.items()):
+    if len(info_dict) == 0:
+        return frame
+    
+    # Calculate panel dimensions
+    max_width = 0
+    total_height = padding_y
+    
+    texts = []
+    for label, value in info_dict.items():
         text = f"{label}: {value}"
-        y_pos = y + i * line_height
+        texts.append(text)
+        (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_DUPLEX, 
+                                                        font_scale, 2)
+        max_width = max(max_width, text_width)
+        total_height += line_height
+    
+    total_height += padding_y
+    panel_width = max_width + 2 * padding_x
+    
+    # Create semi-transparent overlay
+    overlay = frame.copy()
+    
+    # Draw rounded rectangle background with gradient effect
+    panel_bg = (25, 25, 25)  # Dark background
+    cv2.rectangle(overlay, 
+                 (x - padding_x, y - padding_y), 
+                 (x + panel_width - padding_x, y + total_height - padding_y),
+                 panel_bg, -1)
+    
+    # Add subtle border
+    border_color = (60, 180, 255)  # Tennis blue
+    cv2.rectangle(overlay, 
+                 (x - padding_x, y - padding_y), 
+                 (x + panel_width - padding_x, y + total_height - padding_y),
+                 border_color, 2)
+    
+    # Blend overlay with original frame (70% overlay, 30% original)
+    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+    
+    # Draw text with enhanced styling
+    for i, text in enumerate(texts):
+        y_pos = y + i * line_height + padding_y
         
-        # Draw background
-        (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 
-                                                        font_scale, 1)
-        cv2.rectangle(frame, (x - 5, y_pos - text_height - 5), 
-                     (x + text_width + 5, y_pos + 5), bg_color, -1)
+        # Draw text shadow for better readability
+        cv2.putText(frame, text, (x + 2, y_pos + 2), cv2.FONT_HERSHEY_DUPLEX, 
+                   font_scale, (0, 0, 0), 2, cv2.LINE_AA)
         
-        # Draw text
-        cv2.putText(frame, text, (x, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 
-                   font_scale, color, 1, cv2.LINE_AA)
+        # Draw main text
+        cv2.putText(frame, text, (x, y_pos), cv2.FONT_HERSHEY_DUPLEX, 
+                   font_scale, color, 2, cv2.LINE_AA)
     
     return frame
 

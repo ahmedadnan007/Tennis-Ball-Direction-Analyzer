@@ -19,7 +19,7 @@ Usage:
 
 import numpy as np
 from scipy.interpolate import UnivariateSpline
-from scipy.signal import savgol_filter
+from scipy.signal import savgol_filter, medfilt
 from typing import List, Dict, Tuple, Optional
 import warnings
 warnings.filterwarnings('ignore')
@@ -101,13 +101,30 @@ class TrajectoryAnalyzer:
             velocities: Array of (vx, vy) velocity vectors
         
         Returns:
-            Array of speed magnitudes
+            Array of speed magnitudes with outliers filtered
         """
         if len(velocities) == 0:
             return np.array([])
         
         velocities = np.array(velocities)
-        return np.linalg.norm(velocities, axis=1)
+        speeds = np.linalg.norm(velocities, axis=1)
+        
+        # Apply median filter to remove spikes (window size 5 frames)
+        if len(speeds) >= 5:
+            speeds = medfilt(speeds, kernel_size=5)
+        
+        # Remove outliers using IQR method
+        if len(speeds) >= 4:
+            q1 = np.percentile(speeds, 25)
+            q3 = np.percentile(speeds, 75)
+            iqr = q3 - q1
+            upper_bound = q3 + 2.0 * iqr  # More conservative: 2.0 instead of 1.5
+            
+            # Cap speeds at upper bound (realistic max tennis ball speed ~70 m/s or 252 km/h)
+            max_realistic_speed = min(upper_bound, 70.0)  # 70 m/s = 252 km/h
+            speeds = np.clip(speeds, 0, max_realistic_speed)
+        
+        return speeds
     
     def fit_trajectory_polynomial(self, positions, degree=2):
         """Fit polynomial curve to trajectory.
@@ -199,6 +216,46 @@ class TrajectoryAnalyzer:
         except:
             return None
     
+    def calculate_apex_height(self, positions_px, positions_m):
+        """Calculate apex (maximum) height of ball trajectory.
+        
+        Args:
+            positions_px: Array of (x, y) positions in pixels
+            positions_m: Array of (x, y) positions in meters
+        
+        Returns:
+            Dictionary with apex information:
+                - apex_height_meters: Maximum vertical height in meters
+                - apex_height_pixels: Maximum vertical height in pixels
+                - apex_index: Index of apex point
+                - apex_position: (x, y) position at apex
+        """
+        if len(positions_px) < 2:
+            return None
+        
+        # Find minimum Y coordinate (top of screen = low Y value in image coordinates)
+        # Since y-axis is inverted in images (0 at top), minimum y = highest point
+        y_coords_px = positions_px[:, 1]
+        apex_idx = np.argmin(y_coords_px)
+        
+        # Calculate height relative to lowest point in trajectory
+        lowest_y_px = np.max(y_coords_px)
+        apex_y_px = y_coords_px[apex_idx]
+        apex_height_px = lowest_y_px - apex_y_px  # Height above lowest point
+        
+        # Convert to meters
+        apex_height_m = apex_height_px * self.px_to_m_y
+        
+        return {
+            'apex_height_meters': float(apex_height_m),
+            'apex_height_pixels': float(apex_height_px),
+            'apex_index': int(apex_idx),
+            'apex_position_px': positions_px[apex_idx].tolist(),
+            'apex_position_m': positions_m[apex_idx].tolist(),
+            'lowest_y_pixels': float(lowest_y_px),
+            'apex_y_pixels': float(apex_y_px)
+        }
+    
     def detect_bounce(self, positions, velocities, threshold_factor=2.0):
         """Detect potential bounce points in trajectory.
         
@@ -249,6 +306,11 @@ class TrajectoryAnalyzer:
         frames = [h['frame'] for h in track_history]
         positions_px = np.array([h['center'] for h in track_history])
         
+        # Smooth positions using Savitzky-Golay filter to reduce noise
+        if len(positions_px) >= 7:
+            positions_px[:, 0] = savgol_filter(positions_px[:, 0], window_length=5, polyorder=2)
+            positions_px[:, 1] = savgol_filter(positions_px[:, 1], window_length=5, polyorder=2)
+        
         # Convert to meters
         positions_m = np.array([
             self.pixels_to_meters(p[0], p[1]) for p in positions_px
@@ -267,6 +329,9 @@ class TrajectoryAnalyzer:
         
         # Detect bounces
         bounce_indices = self.detect_bounce(positions_px, velocities_px)
+        
+        # Calculate apex height
+        apex_info = self.calculate_apex_height(positions_px, positions_m)
         
         # Calculate statistics
         avg_speed = np.mean(speeds_m) if len(speeds_m) > 0 else 0
@@ -312,6 +377,9 @@ class TrajectoryAnalyzer:
             # Curve fitting
             'polynomial_fit': poly_fit,
             'spline_fit': spline_fit,
+            
+            # Apex height
+            'apex_height': apex_info,
             
             # Bounce detection
             'bounce_points': bounce_indices,

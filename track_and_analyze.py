@@ -16,6 +16,9 @@ import numpy as np
 from ultralytics import YOLO
 from ball_tracker import BallTracker
 from trajectory_analyzer import TrajectoryAnalyzer
+from shot_classifier import ShotClassifier
+from court_detector import CourtDetector
+from data_exporter import ShotDataExporter
 from utils.helpers import (
     draw_trajectory_on_frame, 
     draw_bbox_with_label, 
@@ -41,6 +44,13 @@ def parse_args():
                        help='Direct pixel to meter ratio (overrides court calibration)')
     parser.add_argument('--trail-length', type=int, default=30, 
                        help='Number of points to show in trajectory trail')
+    parser.add_argument('--detect-court', action='store_true',
+                       help='Enable court line detection')
+    parser.add_argument('--export-csv', type=str, default=None,
+                       help='Export shot data to CSV file for ML training')
+    parser.add_argument('--player-handed', type=str, default='right',
+                       choices=['right', 'left'],
+                       help='Player handedness for forehand/backhand classification')
     return parser.parse_args()
 
 
@@ -96,15 +106,56 @@ def main():
             court_width_pixels=args.court_width
         )
     
+    # Initialize shot classifier
+    court_detector = None
+    if args.detect_court:
+        print("[INFO] Initializing court line detector...")
+        court_detector = CourtDetector(width, height)
+    
+    classifier = ShotClassifier(
+        court_width=width,
+        court_height=height,
+        court_detector=court_detector,
+        player_handed=args.player_handed
+    )
+    
+    # Initialize CSV exporter
+    csv_exporter = None
+    if args.export_csv:
+        print(f"[INFO] Will export shot data to: {args.export_csv}")
+        csv_exporter = ShotDataExporter(args.export_csv)
+    
     print("[INFO] Starting tracking and analysis...")
     
     frame_idx = 0
     track_histories = {}  # Store trajectory history for each track ID
+    court_lines_detected = False  # Flag for one-time court detection
+    
+    # Track completed shots for display
+    active_track_ids_prev = set()
+    current_shot_display = None  # Current shot to display
+    shot_display_frames = 0  # Frames to keep displaying shot
+    shot_display_duration = 100  # Show for 100 frames (2 seconds at 50fps)
     
     while True:
         ret, frame = cap.read()
         if not ret:
             break
+        
+        # Detect court lines (only once, on first frame)
+        if args.detect_court and not court_lines_detected and frame_idx == 0:
+            print("[INFO] Detecting court lines...")
+            court_detector.detect_lines(frame)
+            court_lines_detected = True
+            print(f"[INFO] Net position detected at y={court_detector.net_position}")
+        
+        # Draw court lines if detected
+        if args.detect_court and court_detector.court_lines and args.show:
+            # Only draw on display, not on saved video
+            display_frame = frame.copy()
+            court_detector.draw_court_lines(display_frame, color=(0, 255, 0), thickness=1)
+        else:
+            display_frame = frame
         
         # Run YOLO detection
         results = model(frame, conf=args.conf, device=args.device, verbose=False)
@@ -158,31 +209,181 @@ def main():
                 center = (int(obj['center'][0]), int(obj['center'][1]))
                 cv2.circle(frame, center, 5, color, -1)
         
-        # Analyze and display trajectory info
-        info_y = 30
-        for track_id, history in track_histories.items():
-            if len(history) >= 10:  # Only analyze if enough points
+        # Analyze and display trajectory info for ACTIVE shots only
+        overlay_positions = ['top_left', 'top_right', 'bottom_left']
+        overlay_idx = 0
+        
+        # Get currently active track IDs (only show overlays for balls in current frame)
+        active_track_ids = set([obj['id'] for obj in tracked_objects])
+        
+        # Detect completed tracks (tracks that were active but are no longer)
+        completed_tracks = active_track_ids_prev - active_track_ids
+        
+        # If a track completed, save shot info for display and export to CSV
+        for completed_id in completed_tracks:
+            if completed_id in track_histories and len(track_histories[completed_id]) >= 10:
+                history = track_histories[completed_id]
+                analysis = analyzer.analyze_trajectory(history, completed_id)
+                if analysis:
+                    shot_class = classifier.classify_shot(analysis)
+                    
+                    # Filter out stationary/slow balls (minimum 10 km/h)
+                    min_speed_threshold = 10.0  # km/h
+                    
+                    # Export to CSV (only valid shots with sufficient speed)
+                    if csv_exporter and analysis['avg_speed_kmh'] >= min_speed_threshold:
+                        csv_exporter.add_shot(analysis, shot_class)
+                    
+                    # Create shot display data (only for valid shots)
+                    if analysis['avg_speed_kmh'] >= min_speed_threshold:
+                        current_shot_display = {
+                            'speed': analysis['avg_speed_kmh'],
+                            'shot_type': shot_class['type'].replace('_', ' ').title(),
+                            'spin': shot_class.get('spin', 'Unknown').title(),
+                            'direction': shot_class['direction'].replace('_', ' ').title()
+                        }
+                        shot_display_frames = 0  # Reset counter
+        
+        # Update previous active tracks
+        active_track_ids_prev = active_track_ids.copy()
+        
+        for obj in tracked_objects:
+            track_id = obj['id']
+            
+            if track_id in track_histories and len(track_histories[track_id]) >= 10:
+                history = track_histories[track_id]
+                
                 # Analyze trajectory
                 analysis = analyzer.analyze_trajectory(history, track_id)
                 
                 if analysis:
-                    # Display info on frame
-                    info = {
-                        f"Track {track_id}": f"{analysis['avg_speed_kmh']:.1f} km/h",
-                    }
-                    draw_info_panel(frame, info, position=(10, info_y))
-                    info_y += 35
+                    # Classify shot
+                    shot_class = classifier.classify_shot(analysis)
+                    
+                    # Only show overlays for first 3 active tracks
+                    if overlay_idx < 3:
+                        # Get apex height and format shot type for display
+                        apex_height = shot_class.get('apex_height_meters', 0)
+                        height_class = shot_class.get('height_class', '').replace('_', ' ').title()
+                        shot_type_display = shot_class['type'].replace('_', ' ').title()
+                        direction_display = shot_class['direction'].replace('_', ' ').title()
+                        
+                        # Add stroke and spin to display
+                        stroke = shot_class.get('stroke', 'Unknown').title()
+                        spin = shot_class.get('spin', 'Unknown').title()
+                        
+                        # Prepare data for broadcast overlay
+                        shot_data = {
+                            'track_id': track_id,
+                            'shot_type': f"{shot_type_display} ({stroke} {spin})",
+                            'apex_height': apex_height,
+                            'height_class': height_class,
+                            'speed': analysis['avg_speed_kmh'],
+                            'direction': direction_display
+                        }
+                        
+                        
+                        overlay_idx += 1
         
-        # Draw frame counter
-        cv2.putText(frame, f"Frame: {frame_idx}", (width - 150, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Draw shot analytics when available
+        if current_shot_display and shot_display_frames < shot_display_duration:
+            # Position: top-left corner
+            panel_x = 20
+            panel_y = 20
+            panel_width = 320
+            panel_height = 160
+            
+            # Create semi-transparent panel
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (panel_x, panel_y),
+                         (panel_x + panel_width, panel_y + panel_height),
+                         (30, 30, 30), -1)
+            
+            # Yellow accent bar at top
+            cv2.rectangle(overlay, (panel_x, panel_y),
+                         (panel_x + panel_width, panel_y + 6),
+                         (255, 200, 50), -1)
+            
+            # Border
+            cv2.rectangle(overlay, (panel_x, panel_y),
+                         (panel_x + panel_width, panel_y + panel_height),
+                         (80, 80, 80), 2)
+            
+            # Blend
+            cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+            
+            # Display shot information
+            text_x = panel_x + 20
+            text_y = panel_y + 40
+            line_spacing = 30
+            
+            # Shot Type
+            cv2.putText(frame, f"Shot: {current_shot_display['shot_type']}",
+                       (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX, 0.65,
+                       (255, 255, 255), 2, cv2.LINE_AA)
+            text_y += line_spacing
+            
+            # Speed
+            cv2.putText(frame, f"Speed: {current_shot_display['speed']:.1f} km/h",
+                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                       (0, 255, 100), 2, cv2.LINE_AA)
+            text_y += line_spacing
+            
+            # Spin
+            cv2.putText(frame, f"Spin: {current_shot_display['spin']}",
+                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                       (200, 200, 200), 1, cv2.LINE_AA)
+            text_y += line_spacing
+            
+            # Direction
+            cv2.putText(frame, f"Direction: {current_shot_display['direction']}",
+                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                       (200, 200, 200), 1, cv2.LINE_AA)
+            
+            shot_display_frames += 1
+            cv2.rectangle(overlay, (panel_x, panel_y),
+                         (panel_x + panel_width, panel_y + 6),
+                         (255, 200, 50), -1)
+            
+            # Border
+            cv2.rectangle(overlay, (panel_x, panel_y),
+                         (panel_x + panel_width, panel_y + panel_height),
+                         (80, 80, 80), 2)
+            
+            # Blend
+            cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+        
+        # Draw professional frame counter in bottom-right corner
+        counter_text = f"FRAME {frame_idx}/{video_props['frame_count']}"
+        (text_w, text_h), _ = cv2.getTextSize(counter_text, cv2.FONT_HERSHEY_DUPLEX, 0.6, 2)
+        
+        # Semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (width - text_w - 25, height - text_h - 25), 
+                     (width - 5, height - 5), (25, 25, 25), -1)
+        cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+        
+        # Border
+        cv2.rectangle(frame, (width - text_w - 25, height - text_h - 25), 
+                     (width - 5, height - 5), (80, 80, 80), 1)
+        
+        # Text with shadow
+        cv2.putText(frame, counter_text, (width - text_w - 15 + 1, height - 15 + 1),
+                   cv2.FONT_HERSHEY_DUPLEX, 0.6, (0, 0, 0), 2)
+        cv2.putText(frame, counter_text, (width - text_w - 15, height - 15),
+                   cv2.FONT_HERSHEY_DUPLEX, 0.6, (200, 200, 200), 2)
         
         # Write frame
         out.write(frame)
         
-        # Display if requested
+        # Display if requested (with court lines if enabled)
         if args.show:
-            cv2.imshow('Tennis Ball Tracking', frame)
+            if args.detect_court and court_detector.court_lines:
+                display_with_lines = frame.copy()
+                court_detector.draw_court_lines(display_with_lines, color=(0, 255, 0), thickness=1)
+                cv2.imshow('Tennis Ball Tracking', display_with_lines)
+            else:
+                cv2.imshow('Tennis Ball Tracking', frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         
@@ -201,17 +402,70 @@ def main():
     print(f"\n[SUCCESS] Processing complete!")
     print(f"[INFO] Output saved to: {args.output}")
     
+    # Save CSV export if enabled
+    if csv_exporter:
+        csv_exporter.save()
+    
     # Final trajectory analysis
     print("\n" + "="*60)
     print("TRAJECTORY ANALYSIS SUMMARY")
     print("="*60)
     
+    all_classifications = []
     for track_id, history in track_histories.items():
         if len(history) >= 5:
             analysis = analyzer.analyze_trajectory(history, track_id)
             if analysis:
+                shot_class = classifier.classify_shot(analysis)
+                all_classifications.append(shot_class)
+                
                 print(analyzer.get_trajectory_summary(analysis))
+                print(f"Shot Classification: {classifier.get_shot_summary(shot_class)}")
+                print(f"  - Type: {shot_class['type']}")
+                print(f"  - Stroke: {shot_class.get('stroke', 'unknown')}")
+                print(f"  - Spin: {shot_class.get('spin', 'unknown')}")
+                print(f"  - Height Class: {shot_class.get('height_class', 'unknown')}")
+                print(f"  - Apex Height: {shot_class.get('apex_height_meters', 0):.2f}m")
+                print(f"  - Direction: {shot_class['direction']}")
+                print(f"  - Zone: {shot_class['start_zone']} → {shot_class['end_zone']}")
+                print(f"  - Court Side: {shot_class['side']}")
+                print(f"  - Confidence: {shot_class['confidence']:.2f}")
                 print("-" * 60)
+    
+    # Rally statistics
+    if all_classifications:
+        print("\n" + "="*60)
+        print("SHOT STATISTICS")
+        print("="*60)
+        
+        # Count shot types
+        shot_types = {}
+        directions = {}
+        strokes = {}
+        spins = {}
+        for cls in all_classifications:
+            shot_types[cls['type']] = shot_types.get(cls['type'], 0) + 1
+            directions[cls['direction']] = directions.get(cls['direction'], 0) + 1
+            strokes[cls.get('stroke', 'unknown')] = strokes.get(cls.get('stroke', 'unknown'), 0) + 1
+            spins[cls.get('spin', 'unknown')] = spins.get(cls.get('spin', 'unknown'), 0) + 1
+        
+        print("\nShot Types:")
+        for shot_type, count in sorted(shot_types.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {shot_type.replace('_', ' ').title()}: {count}")
+        
+        print("\nStrokes (Forehand/Backhand):")
+        for stroke, count in sorted(strokes.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {stroke.title()}: {count}")
+        
+        print("\nSpin Types:")
+        for spin, count in sorted(spins.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {spin.title()}: {count}")
+        
+        print("\nShot Directions:")
+        for direction, count in sorted(directions.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {direction.replace('_', ' ').title()}: {count}")
+        
+        print("="*60)
     
     print(f"\nTotal tracks analyzed: {len(track_histories)}")
     print(f"Total frames processed: {frame_idx}")

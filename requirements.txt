@@ -7,3 +7,5 @@ scipy
 pandas
 matplotlib
 scikit-learn
+streamlit>=1.28.0
+plotly>=5.17.0
