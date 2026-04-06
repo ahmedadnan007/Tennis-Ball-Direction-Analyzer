@@ -261,6 +261,112 @@ def draw_broadcast_overlay(frame, shot_data, position='top_left'):
     return frame
 
 
+def draw_reel_style_shot_overlay(frame, shot_data, position='top_right'):
+    """Draw a social-media/reel style shot card with mini-court + speed label.
+
+    Args:
+        frame: Image to draw on
+        shot_data: Dict with keys like speed, shot_label, trail_points
+        position: 'top_left' or 'top_right'
+
+    Returns:
+        Frame with overlay
+    """
+    h, w = frame.shape[:2]
+
+    # Compact card similar to the reference image
+    card_w = 185
+    card_h = 210
+    margin = 14
+
+    if position == 'top_left':
+        x1, y1 = margin, margin
+    else:  # top_right
+        x1, y1 = w - card_w - margin, margin
+
+    x2, y2 = x1 + card_w, y1 + card_h
+
+    # Main translucent card (clean and minimal)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), (28, 28, 28), -1)
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), (85, 85, 85), 1)
+    cv2.addWeighted(overlay, 0.62, frame, 0.38, 0, frame)
+
+    # Mini court area
+    court_pad_x = 25
+    court_x1 = x1 + court_pad_x
+    court_y1 = y1 + 14
+    court_x2 = x2 - court_pad_x
+    court_y2 = y1 + 125
+
+    # Court border and inner lines
+    cv2.rectangle(frame, (court_x1, court_y1), (court_x2, court_y2), (225, 225, 225), 1)
+
+    court_w = court_x2 - court_x1
+    court_h = court_y2 - court_y1
+    mid_x = court_x1 + court_w // 2
+    mid_y = court_y1 + court_h // 2
+
+    cv2.line(frame, (mid_x, court_y1), (mid_x, court_y2), (185, 185, 185), 1)
+    cv2.line(frame, (court_x1, mid_y), (court_x2, mid_y), (185, 185, 185), 1)
+
+    svc_top = court_y1 + int(court_h * 0.30)
+    svc_bottom = court_y1 + int(court_h * 0.70)
+    cv2.line(frame, (court_x1, svc_top), (court_x2, svc_top), (150, 150, 150), 1)
+    cv2.line(frame, (court_x1, svc_bottom), (court_x2, svc_bottom), (150, 150, 150), 1)
+
+    # Plot recent trajectory points on mini court
+    trail_points = shot_data.get('trail_points', [])
+    if len(trail_points) > 0:
+        recent_points = trail_points[-8:]
+        n = len(recent_points)
+        for i, pt in enumerate(recent_points):
+            px, py = pt
+            norm_x = max(0.0, min(1.0, float(px) / max(w - 1, 1)))
+            norm_y = max(0.0, min(1.0, float(py) / max(h - 1, 1)))
+
+            cx = int(court_x1 + norm_x * court_w)
+            cy = int(court_y1 + norm_y * court_h)
+
+            # Older points orange, latest points green (reference style)
+            if i < n - 2:
+                color = (30, 140, 255)  # Orange in BGR
+                radius = 2
+            else:
+                color = (70, 220, 90)   # Green in BGR
+                radius = 3
+
+            cv2.circle(frame, (cx, cy), radius, color, -1)
+
+    # Shot label + speed section
+    shot_label = shot_data.get('shot_label', 'Flat Backhand')
+    speed = float(shot_data.get('speed', 0.0))
+
+    # Split shot label across 2 lines like reference (e.g., Flat / Backhand)
+    words = shot_label.split()
+    if len(words) >= 2:
+        line1 = words[0]
+        line2 = " ".join(words[1:])
+    else:
+        line1 = shot_label
+        line2 = ""
+
+    label_y = y1 + 156
+    cv2.putText(frame, line1, (x1 + 14, label_y),
+                cv2.FONT_HERSHEY_DUPLEX, 0.56, (30, 140, 255), 2, cv2.LINE_AA)
+    if line2:
+        cv2.putText(frame, line2, (x1 + 14, label_y + 20),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.56, (30, 140, 255), 2, cv2.LINE_AA)
+
+    speed_x = x2 - 52
+    cv2.putText(frame, f"{int(round(speed))}", (speed_x, label_y + 8),
+                cv2.FONT_HERSHEY_DUPLEX, 0.78, (242, 242, 242), 2, cv2.LINE_AA)
+    cv2.putText(frame, "KM/H", (speed_x - 2, label_y + 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (190, 190, 190), 1, cv2.LINE_AA)
+
+    return frame
+
+
 def draw_info_panel(frame, info_dict, position=(10, 30), font_scale=0.6, 
                     color=(255, 255, 255), bg_color=(0, 0, 0)):
     """Draw broadcast-style information panel with professional styling.

@@ -23,6 +23,7 @@ from utils.helpers import (
     draw_trajectory_on_frame, 
     draw_bbox_with_label, 
     draw_info_panel,
+    draw_reel_style_shot_overlay,
     create_color_from_id,
     get_video_properties
 )
@@ -236,11 +237,19 @@ def main():
                     
                     # Create shot display data (only for valid shots)
                     if analysis['avg_speed_kmh'] >= min_speed_threshold:
+                        spin_label = shot_class.get('spin', 'unknown').title()
+                        stroke_label = shot_class.get('stroke', 'unknown').title()
+                        if stroke_label.lower() == 'unknown':
+                            stroke_label = shot_class['type'].replace('_', ' ').title()
+
                         current_shot_display = {
                             'speed': analysis['avg_speed_kmh'],
                             'shot_type': shot_class['type'].replace('_', ' ').title(),
-                            'spin': shot_class.get('spin', 'Unknown').title(),
-                            'direction': shot_class['direction'].replace('_', ' ').title()
+                            'spin': spin_label,
+                            'stroke': stroke_label,
+                            'direction': shot_class['direction'].replace('_', ' ').title(),
+                            'shot_label': f"{spin_label} {stroke_label}",
+                            'trail_points': [h['center'] for h in history[-24:]]
                         }
                         shot_display_frames = 0  # Reset counter
         
@@ -287,71 +296,9 @@ def main():
         
         # Draw shot analytics when available
         if current_shot_display and shot_display_frames < shot_display_duration:
-            # Position: top-left corner
-            panel_x = 20
-            panel_y = 20
-            panel_width = 320
-            panel_height = 160
-            
-            # Create semi-transparent panel
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (panel_x, panel_y),
-                         (panel_x + panel_width, panel_y + panel_height),
-                         (30, 30, 30), -1)
-            
-            # Yellow accent bar at top
-            cv2.rectangle(overlay, (panel_x, panel_y),
-                         (panel_x + panel_width, panel_y + 6),
-                         (255, 200, 50), -1)
-            
-            # Border
-            cv2.rectangle(overlay, (panel_x, panel_y),
-                         (panel_x + panel_width, panel_y + panel_height),
-                         (80, 80, 80), 2)
-            
-            # Blend
-            cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
-            
-            # Display shot information
-            text_x = panel_x + 20
-            text_y = panel_y + 40
-            line_spacing = 30
-            
-            # Shot Type
-            cv2.putText(frame, f"Shot: {current_shot_display['shot_type']}",
-                       (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX, 0.65,
-                       (255, 255, 255), 2, cv2.LINE_AA)
-            text_y += line_spacing
-            
-            # Speed
-            cv2.putText(frame, f"Speed: {current_shot_display['speed']:.1f} km/h",
-                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                       (0, 255, 100), 2, cv2.LINE_AA)
-            text_y += line_spacing
-            
-            # Spin
-            cv2.putText(frame, f"Spin: {current_shot_display['spin']}",
-                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                       (200, 200, 200), 1, cv2.LINE_AA)
-            text_y += line_spacing
-            
-            # Direction
-            cv2.putText(frame, f"Direction: {current_shot_display['direction']}",
-                       (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                       (200, 200, 200), 1, cv2.LINE_AA)
+            draw_reel_style_shot_overlay(frame, current_shot_display, position='top_right')
             
             shot_display_frames += 1
-            cv2.rectangle(overlay, (panel_x, panel_y),
-                         (panel_x + panel_width, panel_y + 6),
-                         (255, 200, 50), -1)
-            
-            # Border
-            cv2.rectangle(overlay, (panel_x, panel_y),
-                         (panel_x + panel_width, panel_y + panel_height),
-                         (80, 80, 80), 2)
-            
-            # Blend
-            cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
         
         # Draw professional frame counter in bottom-right corner
         counter_text = f"FRAME {frame_idx}/{video_props['frame_count']}"
