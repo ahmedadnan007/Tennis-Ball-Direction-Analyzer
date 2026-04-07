@@ -19,6 +19,8 @@ from datetime import datetime
 import subprocess
 import time
 
+BASE_DIR = Path(__file__).resolve().parent
+
 # Page configuration
 st.set_page_config(
     page_title="AI Tennis Ball Analyzer",
@@ -81,6 +83,8 @@ if 'processed' not in st.session_state:
     st.session_state.processed = False
 if 'output_video' not in st.session_state:
     st.session_state.output_video = None
+if 'output_video_bytes' not in st.session_state:
+    st.session_state.output_video_bytes = None
 if 'csv_data' not in st.session_state:
     st.session_state.csv_data = None
 if 'stats' not in st.session_state:
@@ -250,26 +254,29 @@ def create_speed_vs_height_scatter(df):
     fig.update_layout(height=500)
     return fig
 
-def process_video(video_path, pixels_per_meter, detect_court, player_handed, conf_threshold):
+def process_video(video_path):
     """Process the uploaded video using track_and_analyze.py"""
+    # Fixed defaults for a simple user-friendly experience
+    pixels_per_meter = 22.1
+    detect_court = True
+    player_handed = "Right"
+    conf_threshold = 0.25
     
     # Create output paths
-    output_dir = Path("outputs")
+    output_dir = BASE_DIR / "outputs"
     output_dir.mkdir(exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_video = output_dir / f"analyzed_{timestamp}.mp4"
-    output_csv = output_dir / f"shots_{timestamp}.csv"
     
     # Build command
     cmd = [
-        "py", "-3.12", "track_and_analyze.py",
-        "--weights", "runs/detect/tennis_ball_run/weights/best.pt",
+        "py", "-3.12", str(BASE_DIR / "track_and_analyze.py"),
+        "--weights", str(BASE_DIR / "runs/detect/tennis_ball_run/weights/best.pt"),
         "--source", video_path,
         "--output", str(output_video),
         "--pixels-per-meter", str(pixels_per_meter),
-        "--conf", str(conf_threshold),
-        "--export-csv", str(output_csv)
+        "--conf", str(conf_threshold)
     ]
     
     if detect_court:
@@ -282,6 +289,7 @@ def process_video(video_path, pixels_per_meter, detect_court, player_handed, con
     try:
         process = subprocess.Popen(
             cmd,
+            cwd=str(BASE_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -309,17 +317,46 @@ def process_video(video_path, pixels_per_meter, detect_court, player_handed, con
             output_placeholder.text_area("Processing Log", "\n".join(output_lines[-10:]), height=200)
         
         process.wait()
+
+        def _transcode_for_web(input_path: Path) -> Path:
+            """Transcode to browser-friendly H.264/AAC MP4 for Streamlit preview."""
+            web_path = input_path.with_name(input_path.stem + "_web.mp4")
+            try:
+                import imageio_ffmpeg
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                transcode_cmd = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(input_path),
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    str(web_path)
+                ]
+                subprocess.run(transcode_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if web_path.exists() and web_path.stat().st_size > 0:
+                    return web_path
+            except Exception:
+                pass
+
+            # Fallback: keep original
+            return input_path
         
         if process.returncode == 0:
             progress_placeholder.progress(100, text="Processing complete!")
-            return str(output_video), str(output_csv) if output_csv.exists() else None
+            final_video = _transcode_for_web(output_video)
+            return str(final_video)
         else:
             st.error(f"Processing failed with exit code {process.returncode}")
-            return None, None
+            return None
             
     except Exception as e:
         st.error(f"Error during processing: {str(e)}")
-        return None, None
+        return None
 
 def main():
     # Header
@@ -330,37 +367,7 @@ def main():
     with st.sidebar:
         st.image("https://raw.githubusercontent.com/ultralytics/assets/main/logo/Ultralytics_Logotype_Original.svg", width=200)
         st.markdown("### ⚙️ Configuration")
-        
-        # Settings
-        pixels_per_meter = st.number_input(
-            "Court Calibration (pixels/meter)",
-            min_value=10.0,
-            max_value=50.0,
-            value=22.1,
-            step=0.1,
-            help="Calibration value for converting pixels to meters (default: 22.1 for standard court)"
-        )
-        
-        detect_court = st.checkbox(
-            "Auto-detect Court Lines",
-            value=True,
-            help="Automatically detect court boundaries and net position"
-        )
-        
-        player_handed = st.selectbox(
-            "Player Handedness",
-            ["Auto", "Right", "Left"],
-            help="Player's dominant hand for forehand/backhand classification"
-        )
-        
-        conf_threshold = st.slider(
-            "Detection Confidence Threshold",
-            min_value=0.1,
-            max_value=0.9,
-            value=0.25,
-            step=0.05,
-            help="Minimum confidence for ball detection"
-        )
+        st.success("✅ Easy Mode enabled\n\nNo manual setup required.")
         
         st.markdown("---")
         st.markdown("### 📊 About")
@@ -381,7 +388,7 @@ def main():
         st.markdown("M Shazim (70136926)")
     
     # Main content
-    tab1, tab2, tab3 = st.tabs(["📤 Upload & Process", "📊 Analytics", "ℹ️ About"])
+    tab1, tab2 = st.tabs(["📤 Upload & Process", "ℹ️ About"])
     
     with tab1:
         st.markdown("## Upload Tennis Match Video")
@@ -401,6 +408,7 @@ def main():
                 if 'last_uploaded_file' not in st.session_state or st.session_state.last_uploaded_file != current_file_name:
                     st.session_state.processed = False
                     st.session_state.output_video = None
+                    st.session_state.output_video_bytes = None
                     st.session_state.csv_data = None
                     st.session_state.stats = None
                     st.session_state.last_uploaded_file = current_file_name
@@ -414,32 +422,13 @@ def main():
                 
                 if st.button("🚀 Start Analysis", type="primary", use_container_width=True):
                     with st.spinner("Processing video... This may take a few minutes."):
-                        output_video, output_csv = process_video(
-                            video_path,
-                            pixels_per_meter,
-                            detect_court,
-                            player_handed,
-                            conf_threshold
-                        )
+                        output_video = process_video(video_path)
                         
                         if output_video and os.path.exists(output_video):
                             st.session_state.output_video = output_video
+                            with open(output_video, 'rb') as f:
+                                st.session_state.output_video_bytes = f.read()
                             st.session_state.processed = True
-                            
-                            # Load CSV if available
-                            if output_csv and os.path.exists(output_csv):
-                                st.session_state.csv_data = pd.read_csv(output_csv)
-                                
-                                # Calculate summary stats
-                                df = st.session_state.csv_data
-                                st.session_state.stats = {
-                                    'total_shots': len(df),
-                                    'avg_speed': df['avg_speed_kmh'].mean() if 'avg_speed_kmh' in df.columns else 0,
-                                    'max_speed': df['max_speed_kmh'].max() if 'max_speed_kmh' in df.columns else 0,
-                                    'avg_apex': df['apex_height_meters'].mean() if 'apex_height_meters' in df.columns else 0,
-                                    'forehands': len(df[df['stroke'] == 'forehand']) if 'stroke' in df.columns else 0,
-                                    'backhands': len(df[df['stroke'] == 'backhand']) if 'stroke' in df.columns else 0,
-                                }
                             
                             st.success("✅ Video processed successfully!")
                             st.rerun()
@@ -448,9 +437,8 @@ def main():
             st.markdown("### 📝 Instructions")
             st.markdown("""
             1. **Upload** your tennis video
-            2. **Adjust** settings in sidebar
-            3. Click **Start Analysis**
-            4. View **results** and **download**
+            2. Click **Start Analysis**
+            3. View **results** and **download**
             
             **Recommended:**
             - Video quality: 720p+
@@ -463,137 +451,27 @@ def main():
         if st.session_state.processed and st.session_state.output_video:
             st.markdown("---")
             st.markdown("## 🎬 Processed Video")
-            
-            if os.path.exists(st.session_state.output_video):
-                st.video(st.session_state.output_video)
-                
-                # Download button
+
+            video_bytes = st.session_state.output_video_bytes
+            if video_bytes is None and os.path.exists(st.session_state.output_video):
                 with open(st.session_state.output_video, 'rb') as f:
-                    st.download_button(
-                        label="⬇️ Download Analyzed Video",
-                        data=f,
-                        file_name=f"tennis_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4",
-                        mime="video/mp4",
-                        use_container_width=True
-                    )
+                    video_bytes = f.read()
+                    st.session_state.output_video_bytes = video_bytes
+
+            if video_bytes:
+                st.video(video_bytes, format="video/mp4")
+                st.download_button(
+                    label="⬇️ Download Analyzed Video",
+                    data=video_bytes,
+                    file_name=f"tennis_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4",
+                    mime="video/mp4",
+                    use_container_width=True
+                )
+            else:
+                st.error(f"Processed file could not be loaded for preview: {st.session_state.output_video}")
             
-            # Show summary stats
-            if st.session_state.stats:
-                st.markdown("### 📊 Quick Summary")
-                
-                cols = st.columns(4)
-                with cols[0]:
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <div class="stat-value">{st.session_state.stats['total_shots']}</div>
-                        <div class="stat-label">Total Shots</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with cols[1]:
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <div class="stat-value">{st.session_state.stats['avg_speed']:.1f}</div>
-                        <div class="stat-label">Avg Speed (km/h)</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with cols[2]:
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <div class="stat-value">{st.session_state.stats['max_speed']:.1f}</div>
-                        <div class="stat-label">Max Speed (km/h)</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with cols[3]:
-                    st.markdown(f"""
-                    <div class="stat-card">
-                        <div class="stat-value">{st.session_state.stats['avg_apex']:.2f}</div>
-                        <div class="stat-label">Avg Apex (m)</div>
-                    </div>
-                    """, unsafe_allow_html=True)
     
     with tab2:
-        st.markdown("## 📊 Detailed Analytics")
-        
-        if st.session_state.csv_data is not None:
-            df = st.session_state.csv_data
-            
-            # Shot type breakdown
-            st.markdown("### Shot Type Analysis")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig = create_shot_type_pie(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                fig = create_direction_chart(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Stroke and Spin Analysis
-            st.markdown("### Stroke & Spin Analysis")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig = create_stroke_pie(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                fig = create_spin_pie(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Speed and Height Analysis
-            st.markdown("### Speed & Height Distributions")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig = create_speed_distribution(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                fig = create_apex_distribution(df)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Advanced scatter plot
-            st.markdown("### Advanced Analysis")
-            fig = create_speed_vs_height_scatter(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Court heatmap
-            fig = create_court_heatmap(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Data table
-            st.markdown("### 📋 Shot-by-Shot Data")
-            st.dataframe(
-                df.head(50),
-                use_container_width=True,
-                height=400
-            )
-            
-            # Download CSV
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="⬇️ Download Full CSV Data",
-                data=csv,
-                file_name=f"tennis_shots_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        else:
-            st.info("📤 Upload and process a video to see analytics")
-    
-    with tab3:
         st.markdown("## About This Project")
         
         col1, col2 = st.columns([2, 1])
