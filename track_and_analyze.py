@@ -242,6 +242,52 @@ def main():
                         if stroke_label.lower() == 'unknown':
                             stroke_label = shot_class['type'].replace('_', ' ').title()
 
+                        # Estimate court bounds for accurate mini-court projection
+                        court_bounds = {
+                            'min_x': 0.0,
+                            'max_x': float(width - 1),
+                            'min_y': 0.0,
+                            'max_y': float(height - 1)
+                        }
+
+                        if args.detect_court and court_detector and court_detector.court_lines:
+                            lines = court_detector.court_lines
+
+                            # X bounds from vertical lines (if available)
+                            vertical_lines = lines.get('vertical', []) if isinstance(lines, dict) else []
+                            if vertical_lines:
+                                x_samples = []
+                                for x1, _, x2, _ in vertical_lines:
+                                    x_samples.append((x1 + x2) / 2.0)
+                                if len(x_samples) >= 2:
+                                    x_samples = sorted(x_samples)
+                                    court_bounds['min_x'] = float(max(0.0, x_samples[0]))
+                                    court_bounds['max_x'] = float(min(width - 1, x_samples[-1]))
+
+                            # Y bounds from detected baselines
+                            top_y = lines.get('baseline_left_y', int(height * 0.1))
+                            bottom_y = lines.get('baseline_right_y', int(height * 0.9))
+                            if top_y is not None and bottom_y is not None:
+                                court_bounds['min_y'] = float(max(0.0, min(top_y, bottom_y)))
+                                court_bounds['max_y'] = float(min(height - 1, max(top_y, bottom_y)))
+
+                        # Use analyzed trajectory points (smoothed) for better stability
+                        trail_points = analysis.get('positions_pixels', [])
+                        selected_trail_points = trail_points[-24:] if trail_points else [h['center'] for h in history[-24:]]
+
+                        # Bounds from the exact trail used by the red tracking path
+                        if selected_trail_points:
+                            xs = [p[0] for p in selected_trail_points]
+                            ys = [p[1] for p in selected_trail_points]
+                            trajectory_bounds = {
+                                'min_x': float(min(xs)),
+                                'max_x': float(max(xs)),
+                                'min_y': float(min(ys)),
+                                'max_y': float(max(ys))
+                            }
+                        else:
+                            trajectory_bounds = None
+
                         current_shot_display = {
                             'speed': analysis['avg_speed_kmh'],
                             'shot_type': shot_class['type'].replace('_', ' ').title(),
@@ -249,7 +295,10 @@ def main():
                             'stroke': stroke_label,
                             'direction': shot_class['direction'].replace('_', ' ').title(),
                             'shot_label': f"{spin_label} {stroke_label}",
-                            'trail_points': [h['center'] for h in history[-24:]]
+                            'trail_points': selected_trail_points,
+                            'court_bounds': court_bounds,
+                            'trajectory_bounds': trajectory_bounds,
+                            'map_mode': 'trajectory_ref'
                         }
                         shot_display_frames = 0  # Reset counter
         

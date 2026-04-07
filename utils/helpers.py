@@ -299,44 +299,84 @@ def draw_reel_style_shot_overlay(frame, shot_data, position='top_right'):
     court_x2 = x2 - court_pad_x
     court_y2 = y1 + 125
 
-    # Court border and inner lines
-    cv2.rectangle(frame, (court_x1, court_y1), (court_x2, court_y2), (225, 225, 225), 1)
+    # Court lines using real tennis proportions
+    # Court dimensions (meters): length=23.77, doubles width=10.97, singles width=8.23
+    # Net at center. Service line is 6.40m from net on each side.
+    cv2.rectangle(frame, (court_x1, court_y1), (court_x2, court_y2), (230, 230, 230), 1)
 
     court_w = court_x2 - court_x1
     court_h = court_y2 - court_y1
-    mid_x = court_x1 + court_w // 2
-    mid_y = court_y1 + court_h // 2
 
-    cv2.line(frame, (mid_x, court_y1), (mid_x, court_y2), (185, 185, 185), 1)
-    cv2.line(frame, (court_x1, mid_y), (court_x2, mid_y), (185, 185, 185), 1)
+    # Singles sideline inset ratio from doubles court
+    singles_inset_ratio = (10.97 - 8.23) / (2 * 10.97)  # ~0.1249
+    inset_x = int(court_w * singles_inset_ratio)
 
-    svc_top = court_y1 + int(court_h * 0.30)
-    svc_bottom = court_y1 + int(court_h * 0.70)
-    cv2.line(frame, (court_x1, svc_top), (court_x2, svc_top), (150, 150, 150), 1)
-    cv2.line(frame, (court_x1, svc_bottom), (court_x2, svc_bottom), (150, 150, 150), 1)
+    singles_left_x = court_x1 + inset_x
+    singles_right_x = court_x2 - inset_x
+
+    # Key horizontal lines by regulation ratios
+    # baseline -> service line distance = 11.885 - 6.40 = 5.485m
+    service_from_top_ratio = 5.485 / 23.77
+    service_from_bottom_ratio = 1.0 - service_from_top_ratio
+
+    net_y = court_y1 + court_h // 2
+    svc_top_y = court_y1 + int(court_h * service_from_top_ratio)
+    svc_bottom_y = court_y1 + int(court_h * service_from_bottom_ratio)
+
+    # Singles sidelines
+    cv2.line(frame, (singles_left_x, court_y1), (singles_left_x, court_y2), (185, 185, 185), 1)
+    cv2.line(frame, (singles_right_x, court_y1), (singles_right_x, court_y2), (185, 185, 185), 1)
+
+    # Net line (full width)
+    cv2.line(frame, (court_x1, net_y), (court_x2, net_y), (205, 205, 205), 1)
+
+    # Service lines (only between singles sidelines)
+    cv2.line(frame, (singles_left_x, svc_top_y), (singles_right_x, svc_top_y), (160, 160, 160), 1)
+    cv2.line(frame, (singles_left_x, svc_bottom_y), (singles_right_x, svc_bottom_y), (160, 160, 160), 1)
+
+    # Center service line (between service lines only)
+    center_x = court_x1 + court_w // 2
+    cv2.line(frame, (center_x, svc_top_y), (center_x, svc_bottom_y), (175, 175, 175), 1)
 
     # Plot recent trajectory points on mini court
     trail_points = shot_data.get('trail_points', [])
+    court_bounds = shot_data.get('court_bounds', None)
+    trajectory_bounds = shot_data.get('trajectory_bounds', None)
+    map_mode = shot_data.get('map_mode', 'court_ref')
+
+    # Prefer trajectory-reference mapping so mini-court dots follow
+    # the same path reference as the on-frame red tracking line.
+    source_bounds = trajectory_bounds if map_mode == 'trajectory_ref' and isinstance(trajectory_bounds, dict) else court_bounds
+
+    if isinstance(source_bounds, dict):
+        min_x = float(source_bounds.get('min_x', 0.0))
+        max_x = float(source_bounds.get('max_x', float(w - 1)))
+        min_y = float(source_bounds.get('min_y', 0.0))
+        max_y = float(source_bounds.get('max_y', float(h - 1)))
+    else:
+        min_x, max_x = 0.0, float(w - 1)
+        min_y, max_y = 0.0, float(h - 1)
+
+    # Fallback when detector bounds are invalid
+    if max_x - min_x < 6:
+        min_x, max_x = 0.0, float(w - 1)
+    if max_y - min_y < 6:
+        min_y, max_y = 0.0, float(h - 1)
+
+    span_x = max(max_x - min_x, 1.0)
+    span_y = max(max_y - min_y, 1.0)
+
     if len(trail_points) > 0:
-        recent_points = trail_points[-8:]
-        n = len(recent_points)
-        for i, pt in enumerate(recent_points):
-            px, py = pt
-            norm_x = max(0.0, min(1.0, float(px) / max(w - 1, 1)))
-            norm_y = max(0.0, min(1.0, float(py) / max(h - 1, 1)))
+        # Single live dot only (latest tracked ball position)
+        px, py = trail_points[-1]
+        norm_x = max(0.0, min(1.0, (float(px) - min_x) / span_x))
+        norm_y = max(0.0, min(1.0, (float(py) - min_y) / span_y))
 
-            cx = int(court_x1 + norm_x * court_w)
-            cy = int(court_y1 + norm_y * court_h)
+        cx = int(court_x1 + norm_x * court_w)
+        cy = int(court_y1 + norm_y * court_h)
 
-            # Older points orange, latest points green (reference style)
-            if i < n - 2:
-                color = (30, 140, 255)  # Orange in BGR
-                radius = 2
-            else:
-                color = (70, 220, 90)   # Green in BGR
-                radius = 3
-
-            cv2.circle(frame, (cx, cy), radius, color, -1)
+        # Bright green ball marker
+        cv2.circle(frame, (cx, cy), 4, (70, 220, 90), -1)
 
     # Shot label + speed section
     shot_label = shot_data.get('shot_label', 'Flat Backhand')
