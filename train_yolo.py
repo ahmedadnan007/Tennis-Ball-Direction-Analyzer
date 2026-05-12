@@ -10,7 +10,7 @@ from ultralytics import YOLO
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='data.yaml', help='Path to dataset yaml')
-    parser.add_argument('--model', type=str, default='yolov8n.pt', help='Backbone or weights to start from')
+    parser.add_argument('--model', type=str, default='yolov8m.pt', help='Backbone or weights to start from')
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--imgsz', type=int, default=640)
     parser.add_argument('--batch', type=int, default=16)

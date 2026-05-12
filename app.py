@@ -139,6 +139,29 @@ def create_speed_distribution(df):
     fig.update_layout(height=400)
     return fig
 
+
+def load_pixels_per_meter(default_value=22.1):
+    """Load calibration scale from calibration.json if available."""
+    calibration_file = BASE_DIR / "calibration.json"
+
+    if not calibration_file.exists():
+        return default_value
+
+    try:
+        with open(calibration_file, "r", encoding="utf-8") as f:
+            calibration_data = json.load(f)
+
+        pixels_per_meter = calibration_data.get("pixels_per_meter")
+        if pixels_per_meter is None:
+            pixel_distance = calibration_data.get("pixel_distance")
+            real_distance_meters = calibration_data.get("real_distance_meters")
+            if pixel_distance and real_distance_meters:
+                pixels_per_meter = float(pixel_distance) / float(real_distance_meters)
+
+        return float(pixels_per_meter) if pixels_per_meter else default_value
+    except Exception:
+        return default_value
+
 def create_apex_distribution(df):
     """Create apex height distribution"""
     if df is None or 'apex_height_meters' not in df.columns:
@@ -148,8 +171,6 @@ def create_apex_distribution(df):
         df,
         x='apex_height_meters',
         nbins=25,
-        title='Apex Height Distribution',
-        labels={'apex_height_meters': 'Apex Height (m)', 'count': 'Frequency'},
         color_discrete_sequence=['#2ca02c']
     )
     
@@ -256,8 +277,8 @@ def create_speed_vs_height_scatter(df):
 
 def process_video(video_path):
     """Process the uploaded video using track_and_analyze.py"""
-    # Fixed defaults for a simple user-friendly experience
-    pixels_per_meter = 22.1
+    # Prefer saved calibration if available so speed estimates match this project setup.
+    pixels_per_meter = load_pixels_per_meter()
     detect_court = True
     player_handed = "Right"
     conf_threshold = 0.25
@@ -313,8 +334,8 @@ def process_video(video_path):
                 except:
                     pass
             
-            # Show last 10 lines of output
-            output_placeholder.text_area("Processing Log", "\n".join(output_lines[-10:]), height=200)
+            # Use non-widget output to avoid duplicate widget ID/key errors in update loops
+            output_placeholder.code("\n".join(output_lines[-10:]))
         
         process.wait()
 
