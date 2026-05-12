@@ -2,6 +2,14 @@
 
 This small toolkit trains YOLOv8 on the provided dataset (YOLO format) and runs detection on videos, saving an output with bounding boxes.
 
+Run the Streamlit dashboard with:
+```powershell
+streamlit run app.py
+```
+
+Then open the local URL Streamlit prints in the terminal, usually `http://localhost:8501`.
+Do not open `http://0.0.0.0:8500/` in the browser; `0.0.0.0` is a bind address, not a reachable client URL.
+
 Setup (PowerShell):
 ```powershell
 python -m pip install -r requirements.txt
@@ -11,7 +19,7 @@ Training
  - Ensure your `data.yaml` is at the repository root and points to `train`, `val`, and `test` folders.
  - Example training command:
 ```powershell
-python train_yolo.py --data data.yaml --model yolov8n.pt --epochs 100 --imgsz 640 --batch 16 --name tennis_ball_run
+python train_yolo.py --data data.yaml --model yolov8m.pt --epochs 100 --imgsz 640 --batch 16 --name tennis_ball_run
 ```
  - Trained runs will be saved under `runs/train/<name>/weights/` by the ultralytics library.
 
@@ -23,7 +31,7 @@ python detect_video.py --weights runs/train/tennis_ball_run/weights/best.pt --so
 
 Notes & tips
 - If you have a GPU, pass `--device 0` to use GPU (or `--device cpu` to force CPU).
-- Use a smaller model like `yolov8n.pt` for fast training; switch to `yolov8m.pt`/`yolov8l.pt` for higher accuracy.
+-- Use a smaller model like `yolov8n.pt` for fast experiments; default production model is `yolov8m.pt` for higher accuracy.
 - If detection is missing small balls, try increasing input `--imgsz` (e.g., 1280) and augmentations or more training epochs.
 - Inspect `runs/train/<name>/results.txt` or the ultralytics web UI to monitor mAP and losses.
 
