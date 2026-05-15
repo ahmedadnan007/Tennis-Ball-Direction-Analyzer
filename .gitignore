@@ -58,3 +58,6 @@ yolo*.pt
 tennis-ball-detection-6/train/images/
 tennis-ball-detection-6/valid/images/
 tennis-ball-detection-6/test/images/
+ 
+# Local virtual environment
+.venv312/

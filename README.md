@@ -2,13 +2,15 @@
 
 This small toolkit trains YOLOv8 on the provided dataset (YOLO format) and runs detection on videos, saving an output with bounding boxes.
 
-Run the Streamlit dashboard with:
+Run the new HTML/CSS/JS dashboard with FastAPI:
 ```powershell
-streamlit run app.py
+python -m pip install -r requirements.txt
+uvicorn backend:app --reload --port 8000
 ```
 
-Then open the local URL Streamlit prints in the terminal, usually `http://localhost:8501`.
-Do not open `http://0.0.0.0:8500/` in the browser; `0.0.0.0` is a bind address, not a reachable client URL.
+Then open `http://127.0.0.1:8000/` in the browser (root serves the dashboard).
+
+The legacy Streamlit app has been removed — this repository now uses a FastAPI backend with a static HTML/CSS/JS frontend served at `/` and `/static`.
 
 Setup (PowerShell):
 ```powershell

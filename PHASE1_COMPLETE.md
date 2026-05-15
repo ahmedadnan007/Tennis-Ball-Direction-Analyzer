@@ -108,9 +108,9 @@ for frame in video_frames:
 - Add shot type detector (forehand/backhand)
 
 **Phase 3**: Web Dashboard
-- Build Streamlit interface
-- Upload video and view results
-- Interactive trajectory visualization
+- Build FastAPI + static HTML/CSS/JS frontend
+- Upload video and view results via the FastAPI API (`/api/analyze`)
+- Interactive trajectory visualization in the browser (Plotly charts)
 
 **Phase 4**: Statistics & Analytics
 - Generate match statistics
