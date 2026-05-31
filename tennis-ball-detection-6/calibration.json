@@ -1,0 +1,94 @@
+{
+  "image_path": "tennis court calibration\\court_frame_2.jpg",
+  "image_size": {
+    "width": 1500,
+    "height": 843
+  },
+  "manual_points": {
+    "baseline_top_left": [
+      455,
+      197
+    ],
+    "baseline_top_right": [
+      1044,
+      197
+    ],
+    "baseline_bottom_left": [
+      148,
+      646
+    ],
+    "baseline_bottom_right": [
+      1346,
+      647
+    ],
+    "net_left": [
+      385,
+      272
+    ],
+    "net_right": [
+      1116,
+      272
+    ],
+    "service_line_top_left": [
+      502,
+      255
+    ],
+    "service_line_top_right": [
+      998,
+      255
+    ],
+    "service_line_bottom_left": [
+      394,
+      474
+    ],
+    "service_line_bottom_right": [
+      1102,
+      477
+    ],
+    "sideline_left_top": [
+      530,
+      196
+    ],
+    "sideline_left_bottom": [
+      304,
+      644
+    ],
+    "sideline_right_top": [
+      973,
+      200
+    ],
+    "sideline_right_bottom": [
+      1197,
+      641
+    ],
+    "center_mark_top": [
+      754,
+      201
+    ],
+    "center_mark_bottom": [
+      753,
+      638
+    ]
+  },
+  "court_geometry": {
+    "baseline_top_y": 197.0,
+    "baseline_bottom_y": 646.5,
+    "net_y": 272.0,
+    "service_line_top_y": 255.0,
+    "service_line_bottom_y": 475.5,
+    "sideline_left_x": 417.0,
+    "sideline_right_x": 1085.0,
+    "center_mark_x": 753.5,
+    "court_width_pixels": 668.0,
+    "court_length_pixels": 449.5,
+    "court_center_x": 751.0,
+    "court_center_y": 421.75,
+    "conversion_notes": {
+      "width_pixels_to_meters": "668.0 px = 8.23 m (singles)",
+      "length_pixels_to_meters": "449.5 px = 23.77 m",
+      "pixels_to_meters_x": 0.012320359281437127,
+      "pixels_to_meters_y": 0.052880978865406006
+    }
+  },
+  "timestamp": "C:\\Users\\Saleh Adnan\\Desktop\\TennuisBallAnalyzer\\tennis-ball-detection-6"
+}

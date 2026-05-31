@@ -1,0 +1,7 @@
+path: tennis dataset
+train: train
+val: train
+test: train
+nc: 1
+names:
+  0: tennis ball

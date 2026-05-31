@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TennisAI — Ball Analyzer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      --bg:        #050a0f;
+      --surface:   #0b1520;
+      --surface2:  #0f1e2e;
+      --border:    rgba(255,255,255,0.07);
+      --border2:   rgba(56,189,248,0.2);
+      --text:      #ddeeff;
+      --muted:     #5a7a9a;
+      --accent:    #00e5ff;
+      --accent2:   #39ff14;
+      --orange:    #ff6b2b;
+      --shadow:    0 32px 80px rgba(0,0,0,0.6);
+      --glow:      0 0 40px rgba(0,229,255,0.12);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── BACKGROUND EFFECTS ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% 0%, rgba(0,229,255,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 100%, rgba(57,255,20,0.04) 0%, transparent 50%),
+        radial-gradient(ellipse 40% 60% at 50% 50%, rgba(255,107,43,0.03) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Grid texture */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,229,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 0 32px 64px; }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 56px;
+    }
+
+    .logo {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.6rem;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(0,229,255,0.4);
+    }
+
+    .logo span { color: var(--text); }
+
+    .nav-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 999px;
+      letter-spacing: 0.08em;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 32px;
+      align-items: center;
+      margin-bottom: 64px;
+    }
+
+    .hero-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--accent);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hero-tag::before {
+      content: '';
+      width: 32px;
+      height: 1px;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .hero h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(3.5rem, 7vw, 6.5rem);
+      line-height: 0.92;
+      letter-spacing: 0.02em;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 .line2 {
+      color: var(--accent);
+      text-shadow: 0 0 30px rgba(0,229,255,0.35);
+      display: block;
+    }
+
+    .hero-sub {
+      color: var(--muted);
+      font-size: 1.05rem;
+      font-weight: 300;
+      line-height: 1.6;
+      max-width: 48ch;
+    }
+
+    /* Hero stat cards */
+    .hero-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .hstat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: border-color 0.3s;
+    }
+
+    .hstat:hover { border-color: var(--border2); }
+
+    .hstat-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+
+    .hstat-icon.cyan  { background: rgba(0,229,255,0.1); }
+    .hstat-icon.green { background: rgba(57,255,20,0.1); }
+    .hstat-icon.orange{ background: rgba(255,107,43,0.1); }
+
+    .hstat-label { font-size: 0.8rem; color: var(--muted); }
+    .hstat-val   { font-family: 'Bebas Neue', sans-serif; font-size: 1.35rem; color: var(--text); letter-spacing: 0.05em; }
+
+    /* ── MAIN GRID ── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    /* ── PANELS ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.3rem;
+      letter-spacing: 0.08em;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .panel-sub {
+      font-size: 0.84rem;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    /* ── UPLOAD ── */
+    .drop-zone {
+      border: 1.5px dashed rgba(0,229,255,0.25);
+      border-radius: 18px;
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s;
+      background: rgba(0,229,255,0.02);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(0,229,255,0.05);
+      box-shadow: inset 0 0 30px rgba(0,229,255,0.05);
+    }
+
+    .drop-zone input { display: none; }
+
+    .drop-icon {
+      font-size: 2.2rem;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .drop-text { color: var(--muted); font-size: 0.9rem; }
+    .drop-text strong { color: var(--accent); }
+
+    #fileLabel {
+      display: block;
+      margin-top: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--accent2);
+      word-break: break-all;
+    }
+
+    /* ── BUTTON ── */
+    .btn-primary {
+      width: 100%;
+      margin-top: 16px;
+      padding: 16px;
+      background: linear-gradient(135deg, var(--accent) 0%, #0099bb 100%);
+      color: #050a0f;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.1rem;
+      letter-spacing: 0.12em;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s;
+      box-shadow: 0 8px 24px rgba(0,229,255,0.2);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(0,229,255,0.3);
+    }
+
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(5,10,15,0.3);
+      border-top-color: #050a0f;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .spinner.hidden { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── JOB ID ── */
+    .job-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    .job-row span { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .copy-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      padding: 4px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover { color: var(--accent); border-color: var(--border2); }
+
+    /* ── PROGRESS ── */
+    .progress-section { margin-top: 22px; }
+
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    #statusText { color: var(--accent); font-weight: 500; }
+
+    .progress-track {
+      height: 6px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    #progressFill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      border-radius: inherit;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 12px rgba(0,229,255,0.4);
+    }
+
+    /* ── LOGS ── */
+    .logs-wrap { margin-top: 20px; }
+
+    .logs-head {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logs-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 6px var(--accent2);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    #logBox {
+      background: #030810;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.73rem;
+      color: #4a9;
+      line-height: 1.7;
+      min-height: 180px;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #logBox::-webkit-scrollbar { width: 4px; }
+    #logBox::-webkit-scrollbar-track { background: transparent; }
+    #logBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+    /* ── RESULTS PANEL ── */
+    .results-panel { display: flex; flex-direction: column; gap: 20px; }
+
+    /* ── STAT CARDS ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 20px 18px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+
+    .stat-card:nth-child(1)::before { background: linear-gradient(90deg, var(--accent), transparent); }
+    .stat-card:nth-child(2)::before { background: linear-gradient(90deg, var(--accent2), transparent); }
+    .stat-card:nth-child(3)::before { background: linear-gradient(90deg, var(--orange), transparent); }
+    .stat-card:nth-child(4)::before { background: linear-gradient(90deg, #a78bfa, transparent); }
+
+    .stat-card:hover { border-color: var(--border2); transform: translateY(-3px); }
+
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+
+    .stat-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.4rem;
+      line-height: 1;
+      color: var(--text);
+      letter-spacing: 0.03em;
+    }
+
+    .stat-unit {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* ── VIDEO SECTION ── */
+    .video-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #videoPlayer {
+      width: 100%;
+      display: block;
+      max-height: 460px;
+      background: #000;
+    }
+
+    .download-bar {
+      padding: 14px 18px;
+      display: flex;
+      gap: 12px;
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+    }
+
+    .dl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .dl-btn.primary {
+      background: linear-gradient(135deg, var(--accent), #0099bb);
+      color: #050a0f;
+    }
+
+    .dl-btn.secondary {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .dl-btn:hover { transform: translateY(-1px); }
+
+    /* ── CHARTS ── */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      overflow: hidden;
+    }
+
+    .chart-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1rem;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .chart-card > div[id] { min-height: 240px; }
+
+    /* ── EMPTY STATE ── */
+    .empty-state {
+      background: var(--surface);
+      border: 1px dashed rgba(0,229,255,0.15);
+      border-radius: 20px;
+      padding: 48px 32px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+      display: block;
+      opacity: 0.4;
+    }
+
+    .empty-text { font-size: 0.95rem; }
+
+    /* ── HIDDEN ── */
+    .hidden { display: none !important; }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 1100px) {
+      .main-grid { grid-template-columns: 1fr; }
+      .hero { grid-template-columns: 1fr; }
+      .hero-stats { flex-direction: row; flex-wrap: wrap; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 680px) {
+      .page { padding: 0 16px 48px; }
+      .chart-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .panel { animation: fadeUp 0.5s ease both; }
+    .panel:nth-child(2) { animation-delay: 0.1s; }
+    .stat-card { animation: fadeUp 0.4s ease both; }
+    .stat-card:nth-child(2) { animation-delay: 0.05s; }
+    .stat-card:nth-child(3) { animation-delay: 0.10s; }
+    .stat-card:nth-child(4) { animation-delay: 0.15s; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- NAV -->
+  <nav>
+    <div class="logo">Tennis<span>AI</span></div>
+    <div class="nav-badge">FYP · UOL · 2025</div>
+  </nav>
+
+  <!-- HERO -->
+  <header class="hero">
+    <div>
+      <p class="hero-tag">Computer Vision + Deep Learning</p>
+      <h1>AI Tennis Ball<br><span class="line2">Analyzer</span></h1>
+      <p class="hero-sub">Upload a match video. Our YOLOv8 model detects, tracks, and classifies every shot — direction, spin, speed, and more.</p>
+    </div>
+    <div class="hero-stats">
+      <div class="hstat">
+        <div class="hstat-icon cyan">🎾</div>
+        <div>
+          <div class="hstat-label">Model</div>
+          <div class="hstat-val">YOLOv8n</div>
+        </div>
+      </div>
+      <div class="hstat">
+        <div class="hstat-icon green">⚡</div>
+        <div>
+          <div class="hstat-label">GPU</div>
+          <div class="hstat-val">RTX 3070</div>
+        </div>
+      </div>
+      <div class="hstat">
+        <div class="hstat-icon orange">📊</div>
+        <div>
+          <div class="hstat-label">Tracking</div>
+          <div class="hstat-val">Kalman Filter</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+
+    <!-- LEFT: Upload Panel -->
+    <section class="panel">
+      <div class="panel-title">Upload Video</div>
+      <p class="panel-sub">Choose a tennis clip and start analysis.</p>
+
+      <label class="drop-zone" for="videoInput" id="fileBox">
+        <input id="videoInput" type="file" accept="video/mp4,video/avi,video/mov,video/mkv,.MOV">
+        <span class="drop-icon">📹</span>
+        <p class="drop-text"><strong>Click to select</strong> or drag & drop</p>
+        <p class="drop-text" style="font-size:0.78rem; margin-top:4px;">MP4 · MOV · AVI · MKV</p>
+        <span id="fileLabel"></span>
+      </label>
+
+      <button id="uploadBtn" class="btn-primary">
+        ▶ Start Analysis
+        <span class="spinner hidden" id="uploadSpinner"></span>
+      </button>
+
+      <div class="job-row">
+        Job ID: <span id="jobId">—</span>
+        <button class="copy-btn" id="copyJobBtn">Copy</button>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-head">
+          <span>Status</span>
+          <span id="statusText">Waiting</span>
+        </div>
+        <div class="progress-track">
+          <div id="progressFill"></div>
+        </div>
+      </div>
+
+      <div class="logs-wrap">
+        <div class="logs-head">
+          <span class="logs-dot"></span>
+          Live Logs
+        </div>
+        <pre id="logBox">No logs yet.</pre>
+      </div>
+    </section>
+
+    <!-- RIGHT: Results -->
+    <div class="results-panel">
+
+      <!-- Stats -->
+      <div id="statsRow" class="stats-grid"></div>
+
+      <!-- Empty state -->
+      <div id="resultsEmpty" class="empty-state">
+        <span class="empty-icon">🎾</span>
+        <p class="empty-text">Results will appear here after analysis completes.<br>Upload a video and click Start Analysis.</p>
+      </div>
+
+      <!-- Results area -->
+      <div id="resultsArea" class="hidden">
+
+        <!-- Video -->
+        <div class="video-wrap">
+          <video id="videoPlayer" controls playsinline></video>
+          <div class="download-bar">
+            <a id="videoDownload" class="dl-btn primary" href="#" download>⬇ Download Video</a>
+            <a id="csvDownload" class="dl-btn secondary" href="#" download>📄 Download CSV</a>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-title">Shot Types</div>
+            <div id="chartShotType"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Strokes</div>
+            <div id="chartStroke"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Spin</div>
+            <div id="chartSpin"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Speed Distribution</div>
+            <div id="chartSpeed"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const state = { jobId: null, pollTimer: null };
+
+const el = {
+  videoInput:   document.getElementById('videoInput'),
+  fileLabel:    document.getElementById('fileLabel'),
+  uploadBtn:    document.getElementById('uploadBtn'),
+  uploadSpinner:document.getElementById('uploadSpinner'),
+  fileBox:      document.getElementById('fileBox'),
+  statusText:   document.getElementById('statusText'),
+  progressFill: document.getElementById('progressFill'),
+  logBox:       document.getElementById('logBox'),
+  resultsEmpty: document.getElementById('resultsEmpty'),
+  resultsArea:  document.getElementById('resultsArea'),
+  statsRow:     document.getElementById('statsRow'),
+  videoPlayer:  document.getElementById('videoPlayer'),
+  videoDownload:document.getElementById('videoDownload'),
+  csvDownload:  document.getElementById('csvDownload'),
+  chartShotType:document.getElementById('chartShotType'),
+  chartStroke:  document.getElementById('chartStroke'),
+  chartSpin:    document.getElementById('chartSpin'),
+  chartSpeed:   document.getElementById('chartSpeed'),
+  jobIdText:    document.getElementById('jobId'),
+  copyJobBtn:   document.getElementById('copyJobBtn'),
+};
+
+const CHART_LAYOUT = {
+  paper_bgcolor: 'rgba(0,0,0,0)',
+  plot_bgcolor:  'rgba(0,0,0,0)',
+  font: { color: '#5a7a9a', family: 'DM Sans' },
+  margin: { l: 36, r: 12, t: 12, b: 64 },
+  xaxis: { tickangle: -30, color: '#5a7a9a', gridcolor: 'rgba(255,255,255,0.04)' },
+  yaxis: { color: '#5a7a9a', gridcolor: 'rgba(255,255,255,0.04)' },
+};
+
+const COLORS = ['#00e5ff','#39ff14','#ff6b2b','#a78bfa','#fb7185','#fbbf24'];
+
+function setStatus(text, progress = null) {
+  el.statusText.textContent = text;
+  if (progress !== null)
+    el.progressFill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+}
+
+function setJobId(id) { el.jobIdText.textContent = id || '—'; }
+
+function setLogs(lines) {
+  el.logBox.textContent = (!lines || !lines.length) ? 'No logs yet.' : lines.join('\n');
+  el.logBox.scrollTop = el.logBox.scrollHeight;
+}
+
+function showError(msg) { setStatus('Error', 0); el.logBox.textContent = msg; }
+
+function csvToObjects(csv) {
+  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',');
+  return lines.slice(1).map(line => {
+    const vals = line.split(',');
+    const row = {};
+    headers.forEach((h, i) => row[h] = vals[i] ?? '');
+    return row;
+  });
+}
+
+function toNum(v) { const n = Number(v); return isFinite(n) ? n : 0; }
+
+function renderStatCards(rows) {
+  const count = rows.length;
+  const avgSpeed = count ? rows.reduce((s, r) => s + toNum(r.avg_speed_kmh), 0) / count : 0;
+  const avgApex  = count ? rows.reduce((s, r) => s + toNum(r.apex_height_meters), 0) / count : 0;
+  const avgConf  = count ? rows.reduce((s, r) => s + toNum(r.confidence), 0) / count : 0;
+
+  const cards = [
+    { label: 'Total Shots',    value: count,                  unit: 'detected' },
+    { label: 'Avg Speed',      value: avgSpeed.toFixed(1),    unit: 'km/h' },
+    { label: 'Avg Apex',       value: avgApex.toFixed(2),     unit: 'meters' },
+    { label: 'Avg Confidence', value: avgConf.toFixed(2),     unit: 'score' },
+  ];
+
+  el.statsRow.innerHTML = cards.map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-unit">${c.unit}</div>
+    </div>
+  `).join('');
+}
+
+function countBy(rows, key) {
+  const counts = {};
+  rows.forEach(r => { const v = (r[key] || 'unknown'); counts[v] = (counts[v] || 0) + 1; });
+  return counts;
+}
+
+function renderBar(id, rows, key) {
+  if (!window.Plotly) return;
+  const counts = countBy(rows, key);
+  const labels = Object.keys(counts);
+  const values = Object.values(counts);
+  Plotly.newPlot(id, [{
+    type: 'bar', x: labels, y: values,
+    marker: { color: COLORS, opacity: 0.9 },
+  }], { ...CHART_LAYOUT }, { responsive: true, displayModeBar: false });
+}
+
+function renderSpeed(rows) {
+  if (!window.Plotly) return;
+  const speeds = rows.map(r => toNum(r.avg_speed_kmh)).filter(v => v > 0);
+  Plotly.newPlot('chartSpeed', [{
+    type: 'histogram', x: speeds,
+    marker: { color: '#00e5ff', opacity: 0.8 },
+    nbinsx: 20,
+  }], {
+    ...CHART_LAYOUT,
+    xaxis: { ...CHART_LAYOUT.xaxis, title: { text: 'km/h', font: { color: '#5a7a9a' } } },
+    yaxis: { ...CHART_LAYOUT.yaxis, title: { text: 'Shots', font: { color: '#5a7a9a' } } },
+  }, { responsive: true, displayModeBar: false });
+}
+
+async function fetchCsv(jobId) {
+  const r = await fetch(`/api/results/${jobId}/csv`);
+  if (!r.ok) return [];
+  return csvToObjects(await r.text());
+}
+
+async function renderResults(jobId) {
+  const rows = await fetchCsv(jobId);
+  renderStatCards(rows);
+
+  el.videoPlayer.src   = `/api/results/${jobId}/video`;
+  el.videoDownload.href = `/api/results/${jobId}/video`;
+  el.csvDownload.href   = `/api/results/${jobId}/csv`;
+  el.videoPlayer.load();
+  setJobId(jobId);
+
+  el.resultsEmpty.classList.add('hidden');
+  el.resultsArea.classList.remove('hidden');
+
+  if (!rows.length) return;
+
+  const shotKey = rows[0].type_label  ? 'type_label'  : 'shot_type';
+  const dirKey  = rows[0].direction_label ? 'direction_label' : 'direction';
+  const strKey  = rows[0].stroke_label ? 'stroke_label' : 'stroke';
+
+  renderBar('chartShotType', rows, shotKey);
+  renderBar('chartStroke',   rows, strKey);
+  renderBar('chartSpin',     rows, 'spin');
+  renderSpeed(rows);
+}
+
+async function pollStatus(jobId) {
+  const r = await fetch(`/api/status/${jobId}`);
+  if (!r.ok) throw new Error('Could not load job status');
+  const data = await r.json();
+
+  setStatus(data.message || data.status, data.progress || 0);
+  setLogs(data.logs || []);
+  setJobId(data.job_id || jobId);
+
+  if (data.status === 'done') {
+    clearInterval(state.pollTimer); state.pollTimer = null;
+    await renderResults(jobId);
+    setStatus('Done ✓', 100);
+  }
+  if (data.status === 'error') {
+    clearInterval(state.pollTimer); state.pollTimer = null;
+    showError(data.message || 'Processing failed');
+  }
+}
+
+async function startUpload() {
+  const file = el.videoInput.files?.[0];
+  if (!file) { alert('Please choose a video file first.'); return; }
+
+  state.jobId = null;
+  el.resultsArea.classList.add('hidden');
+  el.resultsEmpty.classList.remove('hidden');
+  el.statsRow.innerHTML = '';
+  el.videoPlayer.removeAttribute('src');
+  el.videoPlayer.load();
+  setStatus('Uploading...', 5);
+  setLogs(['Uploading file...']);
+  el.uploadBtn.disabled = true;
+  el.uploadSpinner.classList.remove('hidden');
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/analyze', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('Upload failed');
+
+    const data = await res.json();
+    state.jobId = data.job_id;
+    setStatus('Queued', 8);
+    setLogs([`Job created: ${data.job_id}`, 'Waiting for backend...']);
+    setJobId(state.jobId);
+
+    state.pollTimer = setInterval(() => {
+      if (state.jobId) pollStatus(state.jobId).catch(e => showError(e.message));
+    }, 2000);
+
+    await pollStatus(state.jobId);
+  } catch (e) {
+    showError(e.message || 'Something went wrong');
+  } finally {
+    el.uploadSpinner.classList.add('hidden');
+    el.uploadBtn.disabled = false;
+  }
+}
+
+// File input
+el.videoInput.addEventListener('change', () => {
+  const f = el.videoInput.files?.[0];
+  el.fileLabel.textContent = f ? `📂 ${f.name}` : '';
+});
+
+// Drag & drop
+el.fileBox.addEventListener('dragover', e => { e.preventDefault(); el.fileBox.classList.add('dragover'); });
+el.fileBox.addEventListener('dragleave', () => el.fileBox.classList.remove('dragover'));
+el.fileBox.addEventListener('drop', e => {
+  e.preventDefault(); el.fileBox.classList.remove('dragover');
+  const f = e.dataTransfer.files?.[0];
+  if (f) {
+    const dt = new DataTransfer(); dt.items.add(f);
+    el.videoInput.files = dt.files;
+    el.videoInput.dispatchEvent(new Event('change'));
+  }
+});
+
+// Copy Job ID
+el.copyJobBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(el.jobIdText.textContent || '');
+    el.copyJobBtn.textContent = '✓ Copied';
+    setTimeout(() => el.copyJobBtn.textContent = 'Copy', 1200);
+  } catch { alert('Copy failed'); }
+});
+
+el.uploadBtn.addEventListener('click', startUpload);
+</script>
+</body>
+</html>

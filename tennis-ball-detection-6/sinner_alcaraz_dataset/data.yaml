@@ -1,0 +1,7 @@
+path: C:\Users\Saleh Adnan\Desktop\TennuisBallAnalyzer\tennis-ball-detection-6\sinner_alcaraz_dataset
+train: train
+val: train
+
+nc: 1
+names:
+  0: tennis_ball
