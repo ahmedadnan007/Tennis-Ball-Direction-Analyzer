@@ -243,12 +243,15 @@ def main():
     processed_shot_ids    = set()
     current_shot_display  = None
     shot_display_frames   = 0
-    shot_display_duration = 180
+    # Shot card ab agle shot tak (ya video end tak) screen pe rahega,
+    # sirf 3 sec ke liye nahi. Naya live shot aate hi wo replace ho jaayega.
+    shot_display_duration = 100000
     total_accepted        = 0
     total_rejected        = 0
 
     live_display        = {}
     live_last_update    = {}
+    locked_speed        = {}   # NEW: per-track locked (peak) speed - ek shot = ek stable number
     LIVE_UPDATE_EVERY   = 8
     MIN_FRAMES_FOR_LIVE = 6
 
@@ -297,8 +300,8 @@ def main():
         for obj in tracked_objects:
             track_id = obj['id']
             color    = create_color_from_id(track_id)
-            label    = f"ID:{track_id} ({obj['avg_confidence']:.2f})"
-            draw_bbox_with_label(frame, obj['bbox'], label, color, 2)
+            # ID label + bounding box hata diya (debug clutter tha).
+            # Ab ball pe sirf saaf colored dot + trail dikhega.
             if track_id in track_histories:
                 positions = [h['center'] for h in track_histories[track_id][-args.trail_length:]]
                 draw_trajectory_on_frame(frame, positions, color, 2)
@@ -322,11 +325,20 @@ def main():
                 if analysis:
                     speed_kmh = analysis.get('avg_speed_kmh', 0)
                     if speed_kmh >= 10.0:
+                        # ── SPEED LOCK ──────────────────────────────────
+                        # Har shot ka PEAK speed pakad ke hold karo. Ye ball
+                        # ki hit-speed (racket se nikalne ke baad) hoti hai
+                        # aur poore shot ke liye stable rehti hai - number
+                        # ab 80->49 ke beech fluctuate nahi karega.
+                        prev_locked   = locked_speed.get(track_id, 0.0)
+                        display_speed = max(prev_locked, speed_kmh)
+                        locked_speed[track_id] = display_speed
+
                         shot_class = classifier.classify_shot(analysis)
                         shot_class = fix_shot_type(shot_class, analysis)
                         display = build_display_data(
                             analysis, shot_class, history,
-                            width, height, args, court_detector, speed_kmh
+                            width, height, args, court_detector, display_speed
                         )
                         live_display[track_id]     = display
                         live_last_update[track_id] = frame_idx
@@ -337,6 +349,7 @@ def main():
             if tid not in active_track_ids and tid in processed_shot_ids:
                 live_display.pop(tid, None)
                 live_last_update.pop(tid, None)
+                locked_speed.pop(tid, None)
 
         completed_tracks = active_track_ids_prev - active_track_ids
 
@@ -356,6 +369,7 @@ def main():
                 track_histories.pop(completed_id, None)
                 live_display.pop(completed_id, None)
                 live_last_update.pop(completed_id, None)
+                locked_speed.pop(completed_id, None)
                 continue
 
             analysis = analyzer.analyze_trajectory(history, completed_id)
@@ -363,6 +377,7 @@ def main():
                 processed_shot_ids.add(completed_id)
                 track_histories.pop(completed_id, None)
                 live_display.pop(completed_id, None)
+                locked_speed.pop(completed_id, None)
                 continue
 
             shot_class = classifier.classify_shot(analysis)
@@ -381,23 +396,30 @@ def main():
                 track_histories.pop(completed_id, None)
                 live_display.pop(completed_id, None)
                 live_last_update.pop(completed_id, None)
+                locked_speed.pop(completed_id, None)
                 continue
 
             total_accepted += 1
             apex_m = analysis.get('apex_height', {}).get('apex_height_meters', 0)
-            print(f"[INFO] ✓ Shot: {shot_class.get('stroke','?')} - {shot_class.get('direction','?')} @ {speed_kmh:.1f} km/h | Apex: {apex_m:.1f}m")
+
+            # Final speed = jo live dikhaya tha wahi (locked peak), taake
+            # shot khatam hote hi number jump na kare.
+            final_speed = max(locked_speed.get(completed_id, 0.0), speed_kmh)
+
+            print(f"[INFO] ✓ Shot: {shot_class.get('stroke','?')} - {shot_class.get('direction','?')} @ {final_speed:.1f} km/h | Apex: {apex_m:.1f}m")
 
             if csv_exporter:
                 csv_exporter.add_shot(analysis, shot_class)
 
             current_shot_display = build_display_data(
                 analysis, shot_class, history,
-                width, height, args, court_detector, speed_kmh
+                width, height, args, court_detector, final_speed
             )
             shot_display_frames = 0
 
             live_display.pop(completed_id, None)
             live_last_update.pop(completed_id, None)
+            locked_speed.pop(completed_id, None)
             processed_shot_ids.add(completed_id)
             track_histories.pop(completed_id, None)
 

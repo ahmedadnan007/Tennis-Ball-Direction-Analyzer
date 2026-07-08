@@ -89,7 +89,7 @@ def _select_device() -> str:
 
 
 # ============================================================
-# FIX: Sahi pixels_per_meter calibration.json se calculate karo
+# pixels_per_meter calibration.json 
 # Tennis court = 8.23m wide (singles), 23.77m long
 # ============================================================
 def _load_calibration():

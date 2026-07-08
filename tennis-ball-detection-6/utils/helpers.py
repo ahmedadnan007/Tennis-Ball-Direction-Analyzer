@@ -92,6 +92,8 @@ def draw_broadcast_overlay(frame, shot_data, position='top_left'):
 # ============================================================
 # PROFESSIONAL OVERLAY - Shows Forehand/Backhand/Serve + Direction + Speed
 # Spin (topspin/slice) REMOVED
+# FIX 1: Ball ab sirf SINGLES court ke andar plot hoti hai (side galleries mein nahi)
+# FIX 2: Trail LINE hata di gayi - ab sirf ball ka dot dikhta hai
 # ============================================================
 def draw_reel_style_shot_overlay(frame, shot_data, position='top_right'):
     h, w = frame.shape[:2]
@@ -146,7 +148,7 @@ def draw_reel_style_shot_overlay(frame, shot_data, position='top_right'):
     cx = court_x1 + court_w // 2
     cv2.line(frame, (cx, svc_top_y), (cx, svc_bottom_y), (140, 160, 180), 1)
 
-    # Trail points
+    # Position data
     trail_points      = shot_data.get('trail_points', [])
     court_bounds      = shot_data.get('court_bounds', None)
     trajectory_bounds = shot_data.get('trajectory_bounds', None)
@@ -169,29 +171,26 @@ def draw_reel_style_shot_overlay(frame, shot_data, position='top_right'):
     span_x = max(max_x - min_x, 1.0)
     span_y = max(max_y - min_y, 1.0)
 
+    # ── FIX 1 ──────────────────────────────────────────────
+    # Ball ki x-position ko sirf SINGLES court (sl_left..sl_right)
+    # ke andar map karo, poori court width pe nahi. Isse ball
+    # kabhi side galleries (doubles tramlines) mein nahi jaayegi.
+    singles_w = max(sl_right - sl_left, 1)
+
     def map_to_court(px, py):
-        norm_x = max(0.02, min(0.98, (float(px) - min_x) / span_x))
+        norm_x = max(0.0, min(1.0, (float(px) - min_x) / span_x))
         norm_y = max(0.02, min(0.98, (float(py) - min_y) / span_y))
-        return int(court_x1 + norm_x * court_w), int(court_y1 + norm_y * court_h)
+        bx = int(sl_left + norm_x * singles_w)
+        by = int(court_y1 + norm_y * court_h)
+        return bx, by
 
-    if len(trail_points) >= 2:
-        total = len(trail_points)
-        for i in range(1, total):
-            pt1   = map_to_court(trail_points[i-1][0], trail_points[i-1][1])
-            pt2   = map_to_court(trail_points[i][0],   trail_points[i][1])
-            alpha = i / total
-            r     = int(50 + alpha * 205)
-            g     = int(200 + alpha * 55)
-            cv2.line(frame, pt1, pt2, (50, g, r), 1 if alpha < 0.5 else 2, cv2.LINE_AA)
-
+    # ── FIX 2 ──────────────────────────────────────────────
+    # Trail LINE aur start-dot hata diya. Ab sirf current ball
+    # ka dot draw hota hai - koi line/trail nahi.
     if len(trail_points) > 0:
         bx, by = map_to_court(trail_points[-1][0], trail_points[-1][1])
         cv2.circle(frame, (bx, by), 7, (0, 255, 200), -1)
         cv2.circle(frame, (bx, by), 4, (255, 255, 255), -1)
-
-    if len(trail_points) > 2:
-        sx, sy = map_to_court(trail_points[0][0], trail_points[0][1])
-        cv2.circle(frame, (sx, sy), 4, (100, 100, 255), -1)
 
     # ── TEXT SECTION ──
     divider_y = court_y2 + 8
